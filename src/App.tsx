@@ -53,7 +53,7 @@ function Shell() {
           )}
         </nav>
       </header>
-      <main id="main" tabIndex={-1}>
+      <main id="main" tabIndex={-1} className={location.pathname.startsWith('/admin') ? 'wide' : undefined}>
         <Suspense fallback={<Spinner />}>
           <Outlet />
         </Suspense>

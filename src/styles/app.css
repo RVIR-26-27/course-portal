@@ -469,3 +469,8 @@ fieldset.question legend { font-weight: 600; font-size: 1rem; line-height: 1.45;
 .resource-list a:hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: var(--shadow-sm); color: var(--fg); }
 .resource-icon { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
 .resource-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+
+/* admin console uses the full page width */
+main.wide { max-width: none; }
+main.wide .admin { grid-template-columns: 240px minmax(0, 1fr); }
+@media (max-width: 900px) { main.wide .admin { grid-template-columns: 1fr; } }
