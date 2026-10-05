@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../../auth/AuthProvider';
-import { api, points, reads } from '../../lib/api';
+import { api, maxPts, pts, reads } from '../../lib/api';
 import type { Lab } from '../../lib/types';
 import { fmtDateTime, fromLocalInput, scheduleOf, toLocalInput, type Phase } from '../../lib/schedule';
 import { Alert, Badge, Icon, ReasonAction, Spinner, type Tone } from '../../components/ui';
@@ -54,10 +54,13 @@ export function Labs() {
 function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning: number; quiz: number; ready: number; graded: number; avg: number | null }; onSaved: (msg: string) => Promise<void> }) {
   const { context } = useAuth();
   const owner = context?.admin_role === 'owner';
-  const [f, setF] = useState({ opens: toLocalInput(lab.opens_at), deadline: toLocalInput(lab.deadline_at), closes: toLocalInput(lab.closes_at), cap: String(Number(lab.late_cap_percent)), enabled: lab.enabled });
+  const initial = () => ({ opens: toLocalInput(lab.opens_at), deadline: toLocalInput(lab.deadline_at), closes: toLocalInput(lab.closes_at), cap: String(Number(lab.late_cap_percent)), enabled: lab.enabled, maxp: Number(lab.max_points ?? 3).toFixed(2) });
+  const [f, setF] = useState(initial);
   const sched = scheduleOf(lab);
   const [label, tone] = PHASE[sched.phase];
-  const dirty = f.opens !== toLocalInput(lab.opens_at) || f.deadline !== toLocalInput(lab.deadline_at) || f.closes !== toLocalInput(lab.closes_at) || Number(f.cap) !== Number(lab.late_cap_percent) || f.enabled !== lab.enabled;
+  const scheduleDirty = f.opens !== toLocalInput(lab.opens_at) || f.deadline !== toLocalInput(lab.deadline_at) || f.closes !== toLocalInput(lab.closes_at) || Number(f.cap) !== Number(lab.late_cap_percent) || f.enabled !== lab.enabled;
+  const pointsDirty = Number(f.maxp) !== Number(lab.max_points ?? 3);
+  const dirty = scheduleDirty || pointsDirty;
   const order = (() => {
     const o = fromLocalInput(f.opens), d = fromLocalInput(f.deadline), c = fromLocalInput(f.closes);
     if (o && d && o >= d) return 'The opening date must be before the deadline.';
@@ -65,6 +68,8 @@ function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning:
     if (o && c && o >= c) return 'The opening date must be before the closing date.';
     const cap = Number(f.cap);
     if (!Number.isFinite(cap) || cap < 0 || cap > 100) return 'The late cap must be between 0 and 100 %.';
+    const mp = Number(f.maxp);
+    if (!Number.isFinite(mp) || mp <= 0 || mp > 100) return 'Maximum points must be between 0.01 and 100.';
     return null;
   })();
   return (
@@ -85,7 +90,7 @@ function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning:
         <div className="stat"><div className="stat-label">Quiz passed</div><div className="stat-value">{stats.quiz}</div></div>
         <div className="stat"><div className="stat-label">Repo ready</div><div className="stat-value">{stats.ready}</div></div>
         <div className="stat"><div className="stat-label">Graded</div><div className="stat-value">{stats.graded}</div></div>
-        <div className="stat"><div className="stat-label">Average</div><div className="stat-value">{points(stats.avg)}</div></div>
+        <div className="stat"><div className="stat-label">Average</div><div className="stat-value">{pts(stats.avg, lab)}</div></div>
       </div>
       <div className="schedule-grid">
         <div>
@@ -107,10 +112,16 @@ function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning:
           <p id={`${lab.slug}-closes-hint`} className="hint">{lab.closes_at ? `Now: ${fmtDateTime(lab.closes_at)}` : 'Empty: late submissions accepted until the end'}</p>
         </div>
         <div>
-          <label>Late cap (% of 3.00)
+          <label>Late cap (% of {Number(f.maxp) > 0 ? Number(f.maxp).toFixed(2) : maxPts(lab)})
             <input type="number" min={0} max={100} step={5} value={f.cap} onChange={(e) => setF({ ...f, cap: e.target.value })} aria-describedby={`${lab.slug}-cap-hint`} />
           </label>
-          <p id={`${lab.slug}-cap-hint`} className="hint">{Number(f.cap) >= 0 ? `Late work earns at most ${points(Math.floor((lab.max_units * Number(f.cap)) / 100))}` : ''}</p>
+          <p id={`${lab.slug}-cap-hint`} className="hint">{Number(f.cap) >= 0 ? `Late work earns at most ${pts(Math.floor((lab.max_units * Number(f.cap)) / 100), { ...lab, max_points: Number(f.maxp) || lab.max_points })}` : ''}</p>
+        </div>
+        <div>
+          <label>Maximum points
+            <input type="number" min={0.5} max={100} step={0.5} value={f.maxp} onChange={(e) => setF({ ...f, maxp: e.target.value })} aria-describedby={`${lab.slug}-max-hint`} />
+          </label>
+          <p id={`${lab.slug}-max-hint`} className="hint">A full solution earns this. Only the scale changes; no regrade needed.</p>
         </div>
       </div>
       <label className="toggle">
@@ -120,13 +131,21 @@ function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning:
       {order && <Alert kind="warning">{order}</Alert>}
       <div className="actions">
         <ReasonAction label="Save schedule" disabled={!dirty || !!order} onConfirm={async (reason) => {
-          const r = await api.admin<{ rescored_students: number }>('set-lab-schedule', {
-            lab: lab.slug, opens_at: fromLocalInput(f.opens), deadline_at: fromLocalInput(f.deadline), closes_at: fromLocalInput(f.closes),
-            late_cap_percent: Number(f.cap), enabled: owner ? f.enabled : undefined, reason,
-          });
-          await onSaved(`${lab.title}: schedule saved${r.rescored_students ? `; ${r.rescored_students} student(s) re-scored` : ''}.`);
+          const parts: string[] = [];
+          if (pointsDirty) {
+            await api.admin('set-lab-points', { lab: lab.slug, max_points: Number(f.maxp), reason });
+            parts.push(`maximum ${Number(f.maxp).toFixed(2)} points`);
+          }
+          if (scheduleDirty) {
+            const r = await api.admin<{ rescored_students: number }>('set-lab-schedule', {
+              lab: lab.slug, opens_at: fromLocalInput(f.opens), deadline_at: fromLocalInput(f.deadline), closes_at: fromLocalInput(f.closes),
+              late_cap_percent: Number(f.cap), enabled: owner ? f.enabled : undefined, reason,
+            });
+            parts.push(`schedule saved${r.rescored_students ? ` (${r.rescored_students} student(s) re-scored)` : ''}`);
+          }
+          await onSaved(`${lab.title}: ${parts.join('; ')}.`);
         }} />
-        {dirty && <button type="button" className="btn btn-ghost" onClick={() => setF({ opens: toLocalInput(lab.opens_at), deadline: toLocalInput(lab.deadline_at), closes: toLocalInput(lab.closes_at), cap: String(Number(lab.late_cap_percent)), enabled: lab.enabled })}>Discard changes</button>}
+        {dirty && <button type="button" className="btn btn-ghost" onClick={() => setF(initial())}>Discard changes</button>}
         <ReasonAction label="Regrade all latest submissions" onConfirm={async (reason) => {
           const r = await api.admin<{ queued: number }>('regrade-lab', { lab: lab.slug, reason });
           await onSaved(`${lab.title}: ${r.queued} regrade(s) queued with the current grader version.`);

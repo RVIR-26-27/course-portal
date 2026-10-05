@@ -31,7 +31,7 @@ import { AdminLayout } from '../src/pages/admin/AdminLayout';
 import { ApiError } from '../src/lib/api';
 import { fakeSession, withAuth } from './helpers';
 
-const LAB = { id: 'lab-1', slug: 'lab01' as const, title: 'Lab 1 — UI, State & Navigation', sort_order: 1, enabled: true, quiz_pass_percent: 75, quiz_time_limit_seconds: 720, quiz_question_count: 8, daily_submission_limit: 5, max_units: 300, opens_at: null as string | null, deadline_at: null as string | null, closes_at: null as string | null, late_cap_percent: 50 };
+const LAB = { id: 'lab-1', slug: 'lab01' as const, title: 'Lab 1 — UI, State & Navigation', sort_order: 1, enabled: true, quiz_pass_percent: 75, quiz_time_limit_seconds: 720, quiz_question_count: 8, daily_submission_limit: 5, max_units: 300, max_points: 3, opens_at: null as string | null, deadline_at: null as string | null, closes_at: null as string | null, late_cap_percent: 50 };
 const student = { id: 's1', status: 'active', first_name: 'Ana', last_name: 'Test', github_login: 'ana-gh', identity_ok: true };
 
 beforeEach(() => vi.clearAllMocks());
@@ -202,5 +202,50 @@ describe('admin student view (simulation)', () => {
     expect(engine.state.latest_grade_units).toBe(150);
     expect(engine.state.latest_grade_details).toMatchObject({ late: true, raw_units: 280, late_cap_units: 150 });
     engine.dispose();
+  });
+});
+
+describe('maximum points', () => {
+  it('scales grades to the lab maximum on the dashboard', async () => {
+    readsMock.labs.mockResolvedValue([{ ...LAB, max_points: 5 }]);
+    readsMock.myStates.mockResolvedValue([{ ...STATE, latest_grade_units: 240 }]);
+    render(withAuth(<Dashboard />, { session: fakeSession, context: { github_id: '1', github_login: 'ana-gh', admin_role: null, student } }));
+    const card = await screen.findByRole('article', { name: /Lab 1/ });
+    expect(card).toHaveTextContent('4.00 / 5.00');
+    expect(screen.getByRole('img', { name: '4.00 of 5.00' })).toBeInTheDocument();
+  });
+});
+
+
+describe('interactive learning module', () => {
+  it('every practice question in the content parses (author check)', async () => {
+    const { learningContent } = await import('../src/content');
+    for (const [lab, md] of Object.entries(learningContent)) {
+      const blocks = [...md.matchAll(/```check\n([\s\S]*?)```/g)].map((m) => m[1]!);
+      expect(blocks.length, lab).toBeGreaterThan(1);
+      for (const b of blocks) {
+        expect(b, `${lab}: question line`).toMatch(/^\? /m);
+        expect((b.match(/^- \[x\] /gm) ?? []).length, `${lab}: a correct option`).toBeGreaterThan(0);
+        expect((b.match(/^- \[[ x]\] /gm) ?? []).length, `${lab}: options`).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  it('checks a practice answer, reveals a prediction and tracks section progress', async () => {
+    const { LearnModule } = await import('../src/components/learn');
+    const md = ['## 1. First', 'Intro text.', '```check', '? Which is right?', '- [ ] wrong', '- [x] right', '> because', '```', '## 2. Second', '```reveal', 'Predict it', '---', 'The answer', '```'].join('\n');
+    render(<LearnModule lab="t1" markdown={md} resources={[]} footer={null} />);
+    expect(screen.getByText('Section progress: 0 of 2')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'wrong' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Check' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Not quite');
+    await userEvent.click(screen.getByRole('radio', { name: 'right' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Check' }));
+    expect(screen.getByText('because')).toBeInTheDocument();
+    expect(screen.queryByText('The answer')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /reveal/ }));
+    expect(screen.getByText('The answer')).toBeInTheDocument();
+    for (const b of screen.getAllByRole('button', { name: /Mark as understood/ })) await userEvent.click(b);
+    expect(screen.getByText('All sections done')).toBeInTheDocument();
   });
 });

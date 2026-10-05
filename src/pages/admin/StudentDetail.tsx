@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
-import { api, points } from '../../lib/api';
+import { api, pts } from '../../lib/api';
+import { useLabsBySlug } from '../../lib/useLabs';
 import { Alert, Badge, ReasonAction, Spinner, shortSha } from '../../components/ui';
 import { fmtDateTime, fromLocalInput, toLocalInput } from '../../lib/schedule';
 
@@ -18,6 +19,7 @@ interface Detail {
 export function StudentDetail() {
   const { id } = useParams();
   const [d, setD] = useState<Detail | null>(null);
+  const labs = useLabsBySlug();
   const [error, setError] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const load = useCallback(() => api.admin<Detail>('student-detail', { student_id: id }).then(setD, (e) => setError(e.message)), [id]);
@@ -65,7 +67,7 @@ export function StudentDetail() {
       {d.labs.map((l) => (
         <details key={l.slug} className="card" open>
           <summary>
-            <strong>{l.slug}</strong> · variant {l.variant_public_id} · access <Badge>{l.github_access_status}</Badge> · grade {points(l.latest_grade_units)}
+            <strong>{l.slug}</strong> · variant {l.variant_public_id} · access <Badge>{l.github_access_status}</Badge> · grade {pts(l.latest_grade_units, labs[l.slug])}
             {l.manual_override && <Badge tone="warn">override</Badge>}
           </summary>
           <p className="small">
@@ -75,7 +77,7 @@ export function StudentDetail() {
           {l.github_access_detail && <p className="small muted">{l.github_access_detail}</p>}
           <p className="small">
             Deadline extension: {l.deadline_extension_at ? <Badge tone="info" icon="clock">until {fmtDateTime(l.deadline_extension_at)}</Badge> : 'none'}
-            {l.latest_grade_details?.late && <> · official result is <Badge tone="warn">late</Badge> (raw {points(l.latest_grade_details.raw_units)})</>}
+            {l.latest_grade_details?.late && <> · official result is <Badge tone="warn">late</Badge> (raw {pts(l.latest_grade_details.raw_units, labs[l.slug])})</>}
           </p>
           <div className="actions">
             <ReasonAction label="Mark learning complete" onConfirm={(reason) => act('mark-learning', { lab: l.slug, reason })} />
@@ -121,7 +123,7 @@ export function StudentDetail() {
           {d.submissions.map((s2) => (
             <tr key={s2.id}>
               <td>{s2.lab}</td><td><code>{shortSha(s2.commit_sha)}</code></td><td>{new Date(s2.requested_at).toLocaleString()}</td>
-              <td>{s2.status}{s2.status_detail ? <div className="small muted">{s2.status_detail}</div> : null}</td><td>{points(s2.grade_units)}</td>
+              <td>{s2.status}{s2.status_detail ? <div className="small muted">{s2.status_detail}</div> : null}</td><td>{pts(s2.grade_units, labs[s2.lab])}</td>
               <td className="small">{s2.runs.map((r) => `g${r.run_generation}:${r.status}${r.staff_review ? ' ⚑ ' + (r.staff_review_reasons ?? []).join(',') : ''}`).join(' · ')}</td>
               <td><ReasonAction label="Regrade exact SHA" onConfirm={async (reason) => { await api.admin('request-regrade', { submission_id: s2.id, reason }); await load(); }} /></td>
             </tr>

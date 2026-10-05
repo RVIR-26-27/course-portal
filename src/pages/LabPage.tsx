@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { ApiError, points, reads } from '../lib/api';
+import { ApiError, maxPts, pts, reads, toPoints } from '../lib/api';
 import type { Lab, LabSlug, LabState, QuizItem, QuizResult, QuizStatus, Submission } from '../lib/types';
 import { liveActions, type LabActions, type PreviewAnswer, type Resolved } from '../lib/labActions';
 import { fmtDate, fmtDateTime, fmtLeft, scheduleOf, type Schedule } from '../lib/schedule';
@@ -10,6 +8,8 @@ import { describeVariant } from '../lib/variantText';
 import { RUBRICS, TOPIC_LABELS } from '../lib/rubric';
 import { Alert, Badge, Banner, Bar, CopyButton, EmptyState, Icon, InlineMd, ScoreRing, Skeleton, Spinner, shortSha, useNow, type IconName } from '../components/ui';
 import { learningContent } from '../content';
+import { resources } from '../content/resources';
+import { LearnModule } from '../components/learn';
 
 type Tab = 'learn' | 'quiz' | 'workshop' | 'submit';
 const TABS: { id: Tab; short: string; long: string; icon: IconName }[] = [
@@ -80,9 +80,9 @@ export function LabView({ lab, state, actions, reload, backTo = '/' }: { lab: La
           <h1>{lab.title}</h1>
           <ScheduleLine sched={sched} />
         </div>
-        <ScoreRing units={state.latest_grade_units} size={84} />
+        <ScoreRing value={state.latest_grade_units === null ? null : toPoints(state.latest_grade_units, lab)} max={Number(lab.max_points ?? 3)} size={84} />
       </div>
-      <ScheduleBanner sched={sched} state={state} />
+      <ScheduleBanner sched={sched} state={state} lab={lab} />
       {state.manual_override &&
         Object.values(state.manual_override).map((o) => (
           <p key={o.label}><Badge tone="warn" icon="shield">{o.label}</Badge></p>
@@ -108,7 +108,7 @@ export function LabView({ lab, state, actions, reload, backTo = '/' }: { lab: La
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="card panel" key={tab}>
         {tab === 'learn' && <LearnTab lab={s} state={state} actions={actions} onChange={reload} goQuiz={() => setTab('quiz')} sched={sched} />}
         {tab === 'quiz' && <QuizTab lab={s} labInfo={lab} actions={actions} sched={sched} onPassed={async () => { await reload(); }} goWorkshop={() => setTab('workshop')} />}
-        {tab === 'workshop' && <WorkshopTab lab={s} state={state} actions={actions} reload={reload} goSubmit={() => setTab('submit')} />}
+        {tab === 'workshop' && <WorkshopTab lab={s} labInfo={lab} state={state} actions={actions} reload={reload} goSubmit={() => setTab('submit')} />}
         {tab === 'submit' && <SubmitTab labInfo={lab} state={state} actions={actions} reload={reload} sched={sched} />}
       </div>
     </section>
@@ -127,9 +127,10 @@ export function ScheduleLine({ sched }: { sched: Schedule }) {
   );
 }
 
-function ScheduleBanner({ sched, state }: { sched: Schedule; state: LabState }) {
+function ScheduleBanner({ sched, state, lab }: { sched: Schedule; state: LabState; lab: Lab }) {
   const now = useNow(1000);
-  const cap = points(sched.lateCapUnits);
+  const cap = pts(sched.lateCapUnits, lab);
+  const max = maxPts(lab);
   if (sched.phase === 'upcoming' && sched.opensAt) {
     return <Banner tone="info" icon="calendar">This lab opens on <strong>{fmtDateTime(sched.opensAt)}</strong> — in <span className="countdown">{fmtLeft(sched.opensAt.getTime() - now)}</span>. You can read about it already; the learning module, quiz and assignment start then.</Banner>;
   }
@@ -140,14 +141,14 @@ function ScheduleBanner({ sched, state }: { sched: Schedule; state: LabState }) 
     return (
       <Banner tone={soon ? 'warn' : 'good'} icon="clock">
         Deadline <strong>{fmtDateTime(sched.deadline)}</strong> — <span className="countdown">{fmtLeft(left)}</span> left.
-        {' '}Later submissions still count, but at most <strong>{cap}</strong> of 3.00.
+        {' '}Later submissions still count, but at most <strong>{cap}</strong> of {max}.
       </Banner>
     );
   }
   if (sched.phase === 'late') {
     return (
       <Banner tone="warn" icon="alert">
-        The deadline ({fmtDateTime(sched.deadline)}) has passed. New submissions count <strong>at most {cap} / 3.00</strong>; your best result counts, so a late attempt never lowers your grade.
+        The deadline ({fmtDateTime(sched.deadline)}) has passed. New submissions count <strong>at most {cap} / {max}</strong>; your best result counts, so a late attempt never lowers your grade.
         {sched.closesAt && <> Submissions close {fmtDateTime(sched.closesAt)} (in <span className="countdown">{fmtLeft(sched.closesAt.getTime() - now)}</span>).</>}
       </Banner>
     );
@@ -160,65 +161,47 @@ function ScheduleBanner({ sched, state }: { sched: Schedule; state: LabState }) 
 
 // ------------------------------------------------------------------ Learn
 function LearnTab({ lab, state, actions, onChange, goQuiz, sched }: { lab: LabSlug; state: LabState; actions: LabActions; onChange: () => Promise<void>; goQuiz: () => void; sched: Schedule }) {
-  const { html, toc } = useMemo(() => {
-    const tokens = marked.lexer(learningContent[lab]);
-    const heads = tokens.filter((t): t is typeof t & { depth: number; text: string } => t.type === 'heading' && (t as { depth: number }).depth === 2);
-    const slugify = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const raw = marked.parser(tokens);
-    // anchor ids for the table of contents (headings in source order)
-    let i = 0;
-    const withIds = raw.replace(/<h2>/g, () => `<h2 id="sec-${slugify(heads[i++]?.text ?? String(i))}">`);
-    return { html: DOMPurify.sanitize(withIds), toc: heads.map((h) => ({ id: `sec-${slugify(h.text)}`, text: h.text.replace(/[`*]/g, '') })) };
-  }, [lab]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const closedForNow = sched.phase === 'upcoming';
-  return (
-    <div className="learn-layout">
-      <div>
-        <article className="prose" dangerouslySetInnerHTML={{ __html: html }} />
-        <hr />
-        {state.learning_completed_at ? (
-          <div className="finish-box">
-            <span><Icon name="success" /> Learning module completed.</span>
-            <button type="button" className="btn btn-primary" onClick={goQuiz}>Go to the readiness quiz <Icon name="arrowRight" size={16} /></button>
-          </div>
-        ) : (
-          <div className="finish-box">
-            <span>Done reading? The quiz checks that you are ready for the assignment.</span>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busy || closedForNow}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                try {
-                  await actions.completeLearning();
-                  await onChange();
-                  goQuiz();
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : 'Failed');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              I have worked through the module — continue to the quiz
-            </button>
-          </div>
-        )}
-        {closedForNow && <p className="small muted">You can complete the module once the lab opens.</p>}
-        {error && <Alert kind="error">{error}</Alert>}
-      </div>
-      {toc.length > 2 && (
-        <nav className="toc" aria-label="On this page">
-          <div className="sidebar-title">On this page</div>
-          {toc.map((t) => <a key={t.id} href={`#${t.id}`} onClick={(e) => { e.preventDefault(); document.getElementById(t.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>{t.text}</a>)}
-        </nav>
+  const footer = (
+    <>
+      <hr />
+      {state.learning_completed_at ? (
+        <div className="finish-box">
+          <span><Icon name="success" /> Learning module completed.</span>
+          <button type="button" className="btn btn-primary" onClick={goQuiz}>Go to the readiness quiz <Icon name="arrowRight" size={16} /></button>
+        </div>
+      ) : (
+        <div className="finish-box">
+          <span>Done reading? The quiz checks that you are ready for the assignment.</span>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || closedForNow}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                await actions.completeLearning();
+                await onChange();
+                goQuiz();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Failed');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            I have worked through the module — continue to the quiz
+          </button>
+        </div>
       )}
-    </div>
+      {closedForNow && <p className="small muted">You can complete the module once the lab opens.</p>}
+      {error && <Alert kind="error">{error}</Alert>}
+    </>
   );
+  return <LearnModule lab={lab} markdown={learningContent[lab]} resources={resources[lab]} footer={footer} />;
 }
 
 // ------------------------------------------------------------------ Quiz
@@ -348,7 +331,7 @@ function Cooldown({ until, serverNow, fetchedAt, onOver }: { until: string; serv
 function ResultPanel({ result }: { result: QuizResult }) {
   return (
     <div className={result.passed ? 'alert alert-success' : 'alert alert-warning'} role="status">
-      <ScoreRing units={result.score_raw} max={result.question_count} size={64} label={`${result.score_raw} of ${result.question_count} correct`} />
+      <ScoreRing value={result.score_raw} max={result.question_count} decimals={0} size={64} label={`${result.score_raw} of ${result.question_count} correct`} />
       <div className="alert-body">
         <p>
           <strong>{result.status === 'expired' ? 'Time ran out.' : result.passed ? 'Passed.' : 'Not passed yet.'}</strong> Score {result.score_raw}/
@@ -425,7 +408,7 @@ function QuizRunner({ status, fetchedAt, actions, onDone }: { status: Extract<Qu
             <Icon name="clock" size={15} /> {fmt(left)}
           </span>
         </div>
-        <Bar value={answered} max={status.items.length} tone={answered === status.items.length ? 'good' : undefined} />
+        <Bar value={answered} max={status.items.length} tone={answered === status.items.length ? 'good' : undefined} label={`${answered} of ${status.items.length} answered`} />
         <nav className="qnav" aria-label="Questions">
           {status.items.map((it) => (
             <a key={it.ordinal} href={`#q${it.ordinal}`} className={answers[it.ordinal]?.length ? 'answered' : ''} aria-label={`Question ${it.ordinal}${answers[it.ordinal]?.length ? ', answered' : ''}`}
@@ -571,7 +554,7 @@ export function QuestionView({ item, value, onChange, saving, review }: { item: 
 }
 
 // ------------------------------------------------------------------ Workshop
-function WorkshopTab({ lab, state, actions, reload, goSubmit }: { lab: LabSlug; state: LabState; actions: LabActions; reload: () => Promise<void>; goSubmit: () => void }) {
+function WorkshopTab({ lab, labInfo, state, actions, reload, goSubmit }: { lab: LabSlug; labInfo: Lab; state: LabState; actions: LabActions; reload: () => Promise<void>; goSubmit: () => void }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const status = state.github_access_status;
@@ -647,7 +630,7 @@ function WorkshopTab({ lab, state, actions, reload, goSubmit }: { lab: LabSlug; 
           </ul>
         </>
       )}
-      <h3>How the assignment is graded (3.00 points)</h3>
+      <h3>How the assignment is graded ({maxPts(labInfo)} points)</h3>
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -655,7 +638,7 @@ function WorkshopTab({ lab, state, actions, reload, goSubmit }: { lab: LabSlug; 
           </thead>
           <tbody>
             {rubric.rows.map((r) => (
-              <tr key={r.category}><td><strong>{r.category}</strong></td><td>{r.points}</td><td className="small">{r.checks}</td></tr>
+              <tr key={r.category}><td><strong>{r.category}</strong></td><td>{((Number(r.points) * Number(labInfo.max_points ?? 3)) / 3).toFixed(2)}</td><td className="small">{r.checks}</td></tr>
             ))}
           </tbody>
         </table>
@@ -698,25 +681,25 @@ function SubmitTab({ labInfo, state, actions, reload, sched }: { labInfo: Lab; s
       {state.latest_grade_units !== null ? (
         <div className="card">
           <div className="grade-hero">
-            <ScoreRing units={state.latest_grade_units} size={112} />
+            <ScoreRing value={state.latest_grade_units === null ? null : toPoints(state.latest_grade_units, labInfo)} max={Number(labInfo.max_points ?? 3)} size={112} />
             <div className="grade-meta">
               <p className="small">
                 Graded commit <code>{shortSha(state.official_sha)}</code>
                 {state.latest_submitted_sha && state.latest_submitted_sha !== state.official_sha && ' — your best result so far; newer submissions count only if they score higher.'}
               </p>
               {details?.late && (
-                <Badge tone="warn" icon="clock">Late: capped at {points(details.late_cap_units ?? sched.lateCapUnits)} (raw {points(details.raw_units ?? null)})</Badge>
+                <Badge tone="warn" icon="clock">Late: capped at {pts(details.late_cap_units ?? sched.lateCapUnits, labInfo)} (raw {pts(details.raw_units ?? null, labInfo)})</Badge>
               )}
             </div>
           </div>
           {details?.staff_review && <Alert kind="warning">Some checks of this result need a staff review. The course staff will contact you if anything changes.</Alert>}
-          {details?.categories && <CategoryTable categories={details.categories} />}
+          {details?.categories && <CategoryTable categories={details.categories} lab={labInfo} />}
         </div>
       ) : (
         <EmptyState icon="upload">No official grade yet — submit your solution below.</EmptyState>
       )}
       <h2>Submit for grading</h2>
-      {late && <Alert kind="warning">The deadline has passed: this submission counts at most <strong>{points(sched.lateCapUnits)} / 3.00</strong>. Your best result counts.</Alert>}
+      {late && <Alert kind="warning">The deadline has passed: this submission counts at most <strong>{pts(sched.lateCapUnits, labInfo)} / {maxPts(labInfo)}</strong>. Your best result counts.</Alert>}
       {closed ? (
         <Alert kind="error">This lab is closed — new submissions are not accepted.</Alert>
       ) : (
@@ -786,8 +769,8 @@ function SubmitTab({ labInfo, state, actions, reload, sched }: { labInfo: Lab; s
                   {s.status_detail && <div className="small muted">{s.status_detail}</div>}
                 </div>
                 <div className="tl-points">
-                  {points(counted)}
-                  {s.late && s.grade_units !== null && s.effective_units !== null && s.grade_units !== s.effective_units && <div className="tiny muted">raw {points(s.grade_units)}</div>}
+                  {pts(counted, labInfo)}
+                  {s.late && s.grade_units !== null && s.effective_units !== null && s.grade_units !== s.effective_units && <div className="tiny muted">raw {pts(s.grade_units, labInfo)}</div>}
                 </div>
               </li>
             );
@@ -806,13 +789,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   hygiene: 'Code hygiene',
 };
 
-export function CategoryTable({ categories }: { categories: { key: string; earned: number; max: number; summary: string }[] }) {
+export function CategoryTable({ categories, lab }: { categories: { key: string; earned: number; max: number; summary: string }[]; lab?: Lab }) {
   return (
     <div className="cat-list" role="list" aria-label="Points per category">
       {categories.map((c) => (
         <div key={c.key} className="cat" role="listitem">
           <span className="cat-name">{CATEGORY_LABELS[c.key] ?? c.key}</span>
-          <span className="cat-points">{points(c.earned)} / {points(c.max)}</span>
+          <span className="cat-points">{pts(c.earned, lab)} / {pts(c.max, lab)}</span>
           <Bar value={c.earned} max={c.max} tone={c.earned === c.max ? 'good' : undefined} />
           {c.summary && <span className="cat-summary">{c.summary}</span>}
         </div>

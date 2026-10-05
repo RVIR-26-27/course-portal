@@ -14,6 +14,7 @@ export interface Lab {
   quiz_question_count: number;
   daily_submission_limit: number;
   max_units: number;
+  max_points: number;
   opens_at: string | null;
   deadline_at: string | null;
   closes_at: string | null;

@@ -45,7 +45,7 @@ export const api = {
 /** Direct reads — RLS limits them to the caller's own rows. */
 export const reads = {
   labs: async (): Promise<Lab[]> => {
-    const { data, error } = await supabase.from('labs').select('id, slug, title, sort_order, enabled, quiz_pass_percent, quiz_time_limit_seconds, quiz_question_count, daily_submission_limit, max_units, opens_at, deadline_at, closes_at, late_cap_percent').order('sort_order');
+    const { data, error } = await supabase.from('labs').select('id, slug, title, sort_order, enabled, quiz_pass_percent, quiz_time_limit_seconds, quiz_question_count, daily_submission_limit, max_units, max_points, opens_at, deadline_at, closes_at, late_cap_percent').order('sort_order');
     if (error) throw error;
     return data as Lab[];
   },
@@ -67,3 +67,9 @@ export const reads = {
 };
 
 export const points = (units: number | null | undefined) => (units === null || units === undefined ? '—' : (units / 100).toFixed(2));
+
+type Scale = { max_units?: number; max_points?: number | string } | null | undefined;
+/** Grader units (0..max_units) -> points of this lab (max_points, default 3.00). */
+export const toPoints = (units: number, lab?: Scale) => (units / (lab?.max_units || 300)) * Number(lab?.max_points ?? 3);
+export const pts = (units: number | null | undefined, lab?: Scale) => (units === null || units === undefined ? '—' : toPoints(units, lab).toFixed(2));
+export const maxPts = (lab?: Scale) => Number(lab?.max_points ?? 3).toFixed(2);

@@ -99,38 +99,39 @@ export function EmptyState({ icon = 'list', children }: { icon?: IconName; child
 }
 
 // ------------------------------------------------------------------ data viz (SVG attributes: CSP forbids inline styles)
-export function ScoreRing({ units, max = 300, size = 96, label }: { units: number | null; max?: number; size?: number; label?: string }) {
-  const r = (size - 12) / 2;
+/** Circular score. `value`/`max` are what is shown (points or a count); the label scales with the ring. */
+export function ScoreRing({ value, max, size = 96, decimals = 2, label }: { value: number | null; max: number; size?: number; decimals?: number; label?: string }) {
+  const r = 42;
   const c = 2 * Math.PI * r;
-  const frac = units === null ? 0 : Math.max(0, Math.min(1, units / max));
+  const frac = value === null || max <= 0 ? 0 : Math.max(0, Math.min(1, value / max));
   const [shown, setShown] = useState(0);
   useEffect(() => {
     const t = requestAnimationFrame(() => setShown(frac));
     return () => cancelAnimationFrame(t);
   }, [frac]);
-  const tone = units === null ? '' : frac >= 0.8 ? 'good' : frac < 0.5 ? 'warn' : '';
+  const tone = value === null ? '' : frac >= 0.8 ? 'good' : frac < 0.5 ? 'warn' : '';
+  const main = value === null ? '—' : value.toFixed(decimals);
+  const sub = `/ ${max.toFixed(decimals)}`;
+  // keep the number inside the inner circle (diameter ~ 72 of the 100-unit viewBox)
+  const mainSize = Math.min(24, 62 / Math.max(2.4, main.length * 0.62));
+  const subSize = Math.min(12, 54 / Math.max(3, sub.length * 0.6));
   return (
-    <div className={`ring ${tone}`} role="img" aria-label={label ?? (units === null ? 'Not graded yet' : `${(units / 100).toFixed(2)} of ${(max / 100).toFixed(2)} points`)}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
-        <circle className="ring-track" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={10} />
-        <circle className="ring-value" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={10} strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c * (1 - shown)} />
+    <div className={`ring ${tone}`} role="img" aria-label={label ?? (value === null ? 'Not graded yet' : `${main} of ${max.toFixed(decimals)}`)}>
+      <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden>
+        <g transform="rotate(-90 50 50)">
+          <circle className="ring-track" cx="50" cy="50" r={r} fill="none" strokeWidth={9} />
+          <circle className="ring-value" cx="50" cy="50" r={r} fill="none" strokeWidth={9} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - shown)} />
+        </g>
+        <text className="ring-main" x="50" y={value === null ? 53 : 51} textAnchor="middle" dominantBaseline="middle" fontSize={mainSize}>{main}</text>
+        <text className="ring-sub" x="50" y="68" textAnchor="middle" dominantBaseline="middle" fontSize={subSize}>{sub}</text>
       </svg>
-      <div className="ring-label" aria-hidden>
-        <div><strong>{units === null ? '—' : (units / 100).toFixed(2)}</strong><br /><span>/ {(max / 100).toFixed(2)}</span></div>
-      </div>
     </div>
   );
 }
 
-export function Bar({ value, max, tone }: { value: number; max: number; tone?: 'good' }) {
-  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  return (
-    <svg className="bar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden>
-      <rect className="bar-track" x="0" y="0" width="100" height="8" rx="4" />
-      <rect className={`bar-fill ${tone ?? ''}`} x="0" y="0" width={pct} height="8" rx="4" />
-    </svg>
-  );
+/** Rounded progress bar (native <progress>, so value/max stay attributes under the strict CSP). */
+export function Bar({ value, max, tone, label }: { value: number; max: number; tone?: 'good'; label?: string }) {
+  return <progress className={`bar${tone ? ` ${tone}` : ''}`} value={Math.max(0, Math.min(value, max))} max={max || 1} aria-label={label} aria-hidden={label ? undefined : true} />;
 }
 
 export type StepState = 'done' | 'current' | 'waiting' | 'todo';

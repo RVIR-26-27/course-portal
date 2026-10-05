@@ -19,6 +19,15 @@ await box.close();                                      // data stays on disk
 `put` with an existing key **replaces** the value. The box must be **opened
 before** anything reads it — in Lab 2, `main()` awaits it before `runApp`.
 
+```check
+? `await box.put('e1', ana)` and later `await box.put('e1', eva)`. What does `box.get('e1')` return?
+- [x] `eva` — `put` with an existing key replaces the value.
+- [ ] `ana` — the first value for a key wins.
+- [ ] A list with both values.
+> A box is a key-value store: one key, one value. That is why the duplicate-id policy of your variant has to be decided *before* calling `put`.
+```
+
+
 ## 2. async / await
 
 ```dart
@@ -32,20 +41,18 @@ Future<void> save(Employee e) async {
 - `list.forEach((x) async { await ... })` does **not** wait; use `for (final x in list) { await ...; }`.
 - `try / catch / finally`: `finally` always runs.
 
+```reveal
 **Trace it:** what is printed?
 
-```dart
-print('A');
-final f = Future(() => print('B'));
-print('C');
-await f;
-print('D');
+    print('A');
+    final f = Future(() => print('B'));
+    print('C');
+    await f;
+    print('D');
+---
+`A C B D` — `Future(() => ...)` schedules its callback for later; the
+synchronous code (`A`, `C`) runs first, then `await` lets `B` run, then `D`.
 ```
-
-<details><summary>Answer</summary>
-
-`A C B D` — `Future(() => ...)` runs later; synchronous code first.
-</details>
 
 ## 3. Serialization
 
@@ -74,6 +81,15 @@ Employee? decode(Object? raw) {
 - Numbers: read `num` and convert (`(v as num).toDouble()`); an `int` is not a `double` on mobile.
 - Old records may miss a new field → use a documented **default**.
 
+```check
+? A stored record has `'createdAt': 'yesterday'`. What should `decode` do?
+- [x] Return `null`, so the list skips this one corrupt record.
+- [ ] Throw, so the whole list screen shows an error.
+- [ ] Use `DateTime.now()` instead.
+> One bad record must not take the whole list down, and inventing a date silently corrupts data. Skip it.
+```
+
+
 ## 4. CRUD and stable ids
 
 | Operation | Hive | Contract |
@@ -85,6 +101,15 @@ Employee? decode(Object? raw) {
 
 The id is created **once**. An edit uses `copyWith` and keeps the id — using
 `add` for edits (or `box.add`, which invents a new key) duplicates records.
+
+```check
+? The user changes Ana's last name on the edit screen. Which write is correct?
+- [x] `put(ana.id, encode(updatedAna))` — same id, new value.
+- [ ] `box.add(encode(updatedAna))`.
+- [ ] Delete the old record, then add one with a fresh id.
+> The id is the identity of the record. `box.add` invents a new key, and a fresh id breaks every reference to the employee.
+```
+
 
 ## 5. Refresh the UI from the source of truth
 
@@ -110,11 +135,12 @@ test('delete persists', () async {
 Reopening simulates an app restart. In `testWidgets`, real file I/O must run
 inside `tester.runAsync(...)`; UI tests usually use the in-memory repository.
 
-<details><summary>Self-check — why is "add, delete, expect getAll() empty" on the same instance not enough?</summary>
-
+```reveal
+why is "add, delete, expect getAll() empty" on the same instance not enough?
+---
 An implementation that only removes the record from an in-memory cache passes
 it, although the record is still on disk and comes back after a restart.
-</details>
+```
 
 ## Common mistakes
 

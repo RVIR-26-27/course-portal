@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../auth/AuthProvider';
-import { points, reads } from '../lib/api';
+import { maxPts, pts, reads, toPoints } from '../lib/api';
 import type { Lab, LabState } from '../lib/types';
 import { fmtDate, fmtLeft, scheduleOf } from '../lib/schedule';
 import { Alert, Badge, Icon, ScoreRing, Skeleton, Steps, useNow, type StepState, type Tone } from '../components/ui';
@@ -64,7 +64,7 @@ export function LabCard({ lab, state, to }: { lab: Lab; state?: LabState; to: st
           <div className="lab-num">{lab.slug.replace('lab0', 'Lab ')}</div>
           <h2 id={`lab-${lab.slug}`}>{lab.title}</h2>
         </div>
-        <ScoreRing units={state?.latest_grade_units ?? null} size={64} />
+        <ScoreRing value={state?.latest_grade_units == null ? null : toPoints(state.latest_grade_units, lab)} max={Number(lab.max_points ?? 3)} size={64} />
       </div>
       <div className="row">
         {!lab.enabled && <Badge tone="warn" icon="lock">Not open yet</Badge>}
@@ -72,7 +72,7 @@ export function LabCard({ lab, state, to }: { lab: Lab; state?: LabState; to: st
         {lab.enabled && sched.phase === 'open' && sched.deadline && (
           <Badge tone={sched.deadline.getTime() - now < 48 * 3600_000 ? 'warn' : 'neutral'} icon="clock">Due in {fmtLeft(sched.deadline.getTime() - now)}</Badge>
         )}
-        {lab.enabled && sched.phase === 'late' && <Badge tone="warn" icon="alert">Late — max {points(sched.lateCapUnits)}</Badge>}
+        {lab.enabled && sched.phase === 'late' && <Badge tone="warn" icon="alert">Late — max {pts(sched.lateCapUnits, lab)}</Badge>}
         {lab.enabled && sched.phase === 'closed' && <Badge tone="bad" icon="lock">Closed</Badge>}
         {sched.extended && <Badge tone="info">Extension</Badge>}
       </div>
@@ -83,7 +83,7 @@ export function LabCard({ lab, state, to }: { lab: Lab; state?: LabState; to: st
         <dt>Assignment</dt>
         <dd><Badge tone={acc.tone}>{acc.text}</Badge></dd>
         <dt>Grade</dt>
-        <dd><strong>{state?.latest_grade_units !== null && state?.latest_grade_units !== undefined ? `${points(state.latest_grade_units)} / 3.00` : '—'}</strong>{state?.latest_grade_details?.late && <> <Badge tone="warn">late</Badge></>}</dd>
+        <dd><strong>{state?.latest_grade_units !== null && state?.latest_grade_units !== undefined ? `${pts(state.latest_grade_units, lab)} / ${maxPts(lab)}` : '—'}</strong>{state?.latest_grade_details?.late && <> <Badge tone="warn">late</Badge></>}</dd>
       </dl>
       <div className="grow-space" />
       {lab.enabled && to && (
@@ -117,7 +117,9 @@ export function Dashboard() {
 
 export function DashboardView({ labs, states, student, linkFor }: { labs: Lab[] | null; states: LabState[]; student: { first_name: string; last_name: string; github_login: string; status: string } | null; linkFor: (slug: string) => string | null }) {
   const graded = states.filter((x) => x.latest_grade_units !== null);
-  const total = graded.reduce((a, x) => a + (x.latest_grade_units ?? 0), 0);
+  const labOf = (st: LabState) => labs?.find((l) => l.id === st.lab_id);
+  const total = graded.reduce((a, x) => a + toPoints(x.latest_grade_units ?? 0, labOf(x)), 0);
+  const possible = (labs ?? []).reduce((a, l) => a + Number(l.max_points ?? 3), 0);
   return (
     <section className="page">
       <div className="hero">
@@ -133,7 +135,7 @@ export function DashboardView({ labs, states, student, linkFor }: { labs: Lab[] 
       {labs && (
         <div className="stats">
           <div className="stat"><div className="stat-label">Labs graded</div><div className="stat-value">{graded.length} / {labs.length}</div></div>
-          <div className="stat"><div className="stat-label">Points so far</div><div className="stat-value">{points(total)} <span className="muted small">/ {points(labs.length * 300)}</span></div></div>
+          <div className="stat"><div className="stat-label">Points so far</div><div className="stat-value">{total.toFixed(2)} <span className="muted small">/ {possible.toFixed(2)}</span></div></div>
           <div className="stat"><div className="stat-label">Quizzes passed</div><div className="stat-value">{states.filter((x) => x.quiz_passed_at).length}</div></div>
         </div>
       )}

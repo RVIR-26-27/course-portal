@@ -12,6 +12,15 @@
 | `404` | not found | show "not found" |
 | `5xx` | server failed | "try again later" |
 
+```check
+? The forecast API answers `503 Service Unavailable`. What should the app tell the user?
+- [x] Something went wrong on the server — try again later.
+- [ ] Sign in again.
+- [ ] The city does not exist.
+> `5xx` means the server failed, not the request. "Not found" (`404`) and "sign in" (`401`) would send the user in the wrong direction.
+```
+
+
 ## 2. Dio
 
 ```dart
@@ -39,6 +48,15 @@ try {
 Translate these into **your own** failure type (`WeatherFailure`) inside the
 service, so widgets never see Dio.
 
+```check
+? With default options, what does `await dio.get(url)` do when the server answers `500`?
+- [x] It throws a `DioException` with type `badResponse`.
+- [ ] It returns a `Response` whose `statusCode` is 500.
+- [ ] It retries automatically three times.
+> Dio treats non-2xx statuses as errors by default. That is why your service catches `DioException` and maps it to `WeatherFailure`.
+```
+
+
 ## 3. Parsing JSON defensively
 
 ```dart
@@ -50,11 +68,12 @@ final temp = (current['temperature_2m'] as num).toDouble();   // 12 or 12.5
 Daily values arrive as parallel arrays (`time[i]`, `temperature_2m_max[i]`, …);
 check that they have the same length.
 
-<details><summary>Self-check 1 — the geocoding API answers <code>{"generationtime_ms": 0.2}</code>. What should the service do?</summary>
-
+```reveal
+the geocoding API answers `{"generationtime_ms": 0.2}`. What should the service do?
+---
 There is no `results` list: the city was not found. Throw
 `WeatherFailure(cityNotFound)` — not a crash, not a generic error.
-</details>
+```
 
 ## 4. UI states
 
@@ -74,6 +93,15 @@ notifyListeners();
 ```
 
 `Future.wait([a(), b()])` runs both requests concurrently.
+
+```check
+? The request throws a `WeatherFailure`. Which steps must still happen?
+- [x] Set `status` to `error`.
+- [x] Call `notifyListeners()` so the spinner disappears.
+- [ ] Nothing — the exception will reach the widget anyway.
+> Every path must end in a defined state *and* tell the UI. Otherwise the user is left with a spinner that never stops.
+```
+
 
 ## 5. Authentication state
 
@@ -97,6 +125,15 @@ contains a private key with admin rights: never download it into the app
 project, never commit it; if it leaks, **revoke** it. The same holds for any
 paid API key: an app cannot keep secrets.
 
+```check
+? You put a paid weather API key into a Dart constant in the app. Who can read it?
+- [x] Anyone who has the app build — keys can be extracted from it.
+- [ ] Nobody — compiled code hides string constants.
+- [ ] Only users who are signed in.
+> Everything shipped in an app is public. Secrets belong on a server you control; an app can only hold client configuration.
+```
+
+
 ## 7. Testing without the network
 
 - Widget tests inject **fake services** (`FakeAuthService`, `FakeWeatherService`).
@@ -105,12 +142,13 @@ paid API key: an app cannot keep secrets.
   get tested.
 - `MockFirebaseAuth` (firebase_auth_mocks) tests your Firebase adapter.
 
-<details><summary>Self-check 2 — which test detects "timeouts are reported as network errors"?</summary>
-
+```reveal
+which test detects "timeouts are reported as network errors"?
+---
 A Dio adapter test whose fake adapter throws `DioException.connectionTimeout`
 and expects `WeatherFailure` with kind `timeout`. A fake *service* test cannot,
 because it bypasses your mapping code.
-</details>
+```
 
 ## Connection to the workshop
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { api, points } from '../../lib/api';
+import { api, pts } from '../../lib/api';
+import { useLabsBySlug } from '../../lib/useLabs';
 import { Alert, Badge, Spinner } from '../../components/ui';
 import { LAB_SLUGS } from './AdminLayout';
 
@@ -20,6 +21,7 @@ export interface OverviewRow {
 
 export function Students() {
   const [rows, setRows] = useState<OverviewRow[] | null>(null);
+  const labs = useLabsBySlug();
   const [q, setQ] = useState('');
   const [problems, setProblems] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +79,7 @@ export function Students() {
                   return (
                     <td key={l} className="small">
                       {s.quiz_passed ? '✓ quiz' : `${s.quiz_attempts} att.`} · {s.access}
-                      {s.grade_units !== null && <> · <strong>{points(s.grade_units)}</strong></>}
+                      {s.grade_units !== null && <> · <strong>{pts(s.grade_units, labs[l])}</strong></>}
                       {s.job_problem && <> · <Badge tone="bad">{s.job_problem}</Badge></>}
                       {s.last_submission_status === 'error' && <> · <Badge tone="bad">grading error</Badge></>}
                       {s.override && <> · <Badge tone="warn">override</Badge></>}
