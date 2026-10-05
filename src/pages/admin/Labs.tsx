@@ -18,12 +18,14 @@ const PHASE: Record<Phase, [string, Tone]> = {
 export function Labs() {
   const [labs, setLabs] = useState<Lab[] | null>(null);
   const [rows, setRows] = useState<OverviewRow[]>([]);
+  const [locks, setLocks] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
-      const [l, r] = await Promise.all([reads.labs(), api.admin<OverviewRow[]>('overview')]);
+      const [l, r, k] = await Promise.all([reads.labs(), api.admin<OverviewRow[]>('overview'), api.admin<Record<string, boolean>>('lab-points-lock')]);
       setLabs(l);
       setRows(r);
+      setLocks(k);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Failed');
     }
@@ -42,7 +44,7 @@ export function Labs() {
           const graded = s.filter((x) => x!.grade_units !== null);
           const avg = graded.length ? Math.round(graded.reduce((a, x) => a + (x!.grade_units ?? 0), 0) / graded.length) : null;
           return (
-            <LabScheduleCard key={lab.id} lab={lab} onSaved={async (m) => { setMsg(m); await load(); }}
+            <LabScheduleCard key={lab.id} lab={lab} pointsLocked={!!locks[lab.slug]} onSaved={async (m) => { setMsg(m); await load(); }}
               stats={{ learning: s.filter((x) => x!.learning).length, quiz: s.filter((x) => x!.quiz_passed).length, ready: s.filter((x) => x!.access === 'ready').length, graded: graded.length, avg }} />
           );
         })}
@@ -51,7 +53,7 @@ export function Labs() {
   );
 }
 
-function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning: number; quiz: number; ready: number; graded: number; avg: number | null }; onSaved: (msg: string) => Promise<void> }) {
+function LabScheduleCard({ lab, stats, onSaved, pointsLocked }: { lab: Lab; pointsLocked: boolean; stats: { learning: number; quiz: number; ready: number; graded: number; avg: number | null }; onSaved: (msg: string) => Promise<void> }) {
   const { context } = useAuth();
   const owner = context?.admin_role === 'owner';
   const initial = () => ({ opens: toLocalInput(lab.opens_at), deadline: toLocalInput(lab.deadline_at), closes: toLocalInput(lab.closes_at), cap: String(Number(lab.late_cap_percent)), enabled: lab.enabled, maxp: Number(lab.max_points ?? 3).toFixed(2) });
@@ -119,9 +121,13 @@ function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning:
         </div>
         <div>
           <label>Maximum points
-            <input type="number" min={0.5} max={100} step={0.5} value={f.maxp} onChange={(e) => setF({ ...f, maxp: e.target.value })} aria-describedby={`${lab.slug}-max-hint`} />
+            <input type="number" min={0.5} max={100} step={0.5} value={f.maxp} disabled={pointsLocked} onChange={(e) => setF({ ...f, maxp: e.target.value })} aria-describedby={`${lab.slug}-max-hint`} />
           </label>
-          <p id={`${lab.slug}-max-hint`} className="hint">A full solution earns this. Only the scale changes; no regrade needed.</p>
+          <p id={`${lab.slug}-max-hint`} className="hint">
+            {pointsLocked
+              ? 'Fixed: student repositories exist, and their README states these points.'
+              : 'Set before the semester. Every student README is written with this value; it is fixed once the first repository is created.'}
+          </p>
         </div>
       </div>
       <label className="toggle">
