@@ -1,0 +1,23 @@
+# PUBLIC course-portal: Supabase Free projects pause after 1 week without
+# activity. A daily read of the public `labs` table (anon key, RLS) keeps the
+# project active. Runs on free public-repository minutes.
+name: keepalive
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Read public lab metadata
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          test -n "$SUPABASE_URL" || { echo "SUPABASE_URL not configured"; exit 0; }
+          curl -fsS -o /dev/null -w "%{http_code}\n" "$SUPABASE_URL/rest/v1/labs?select=slug" -H "apikey: $SUPABASE_ANON_KEY"
