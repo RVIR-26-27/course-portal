@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { api, points } from '../../lib/api';
 import { Alert, Badge, ReasonAction, Spinner, shortSha } from '../../components/ui';
+import { fmtDateTime, fromLocalInput, toLocalInput } from '../../lib/schedule';
 
 interface Detail {
   student: Record<string, any>;
@@ -72,6 +73,10 @@ export function StudentDetail() {
             {l.github_repo_full_name ? <a href={l.github_repo_url} target="_blank" rel="noreferrer">{l.github_repo_full_name}</a> : '—'} · official {shortSha(l.official_sha)}
           </p>
           {l.github_access_detail && <p className="small muted">{l.github_access_detail}</p>}
+          <p className="small">
+            Deadline extension: {l.deadline_extension_at ? <Badge tone="info" icon="clock">until {fmtDateTime(l.deadline_extension_at)}</Badge> : 'none'}
+            {l.latest_grade_details?.late && <> · official result is <Badge tone="warn">late</Badge> (raw {points(l.latest_grade_details.raw_units)})</>}
+          </p>
           <div className="actions">
             <ReasonAction label="Mark learning complete" onConfirm={(reason) => act('mark-learning', { lab: l.slug, reason })} />
             <ReasonAction label="Reset quiz cooldown" onConfirm={(reason) => act('reset-cooldown', { lab: l.slug, reason })} />
@@ -81,6 +86,7 @@ export function StudentDetail() {
             <ReasonAction label="Relock (revoke access)" danger onConfirm={(reason) => act('relock', { lab: l.slug, reason })} />
             {l.manual_override?.relock && <ReasonAction label="Clear relock" onConfirm={(reason) => act('clear-relock', { lab: l.slug, reason })} />}
             <AttachRepo onSave={(repo_id, repo_full_name, baseline_sha, reason) => act('attach-repo', { lab: l.slug, repo_id, repo_full_name, baseline_sha, reason })} />
+            <Extension current={l.deadline_extension_at} onSave={(until, reason) => act('set-extension', { lab: l.slug, until, reason })} />
           </div>
         </details>
       ))}
@@ -221,6 +227,19 @@ function AttachRepo({ onSave }: { onSave: (repoId: string, fullName: string, bas
       <label>Numeric repository id<input value={repoId} onChange={(e) => setRepoId(e.target.value)} inputMode="numeric" /></label>
       <label>Full name (org/repo)<input value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label>Personalized baseline SHA (optional)<input value={baseline} onChange={(e) => setBaseline(e.target.value)} /></label>
+    </ReasonAction>
+  );
+}
+
+function Extension({ current, onSave }: { current: string | null; onSave: (until: string | null, reason: string) => Promise<void> }) {
+  const [until, setUntil] = useState(toLocalInput(current));
+  return (
+    <ReasonAction label={current ? 'Change / remove extension' : 'Grant deadline extension'} onConfirm={(reason) => onSave(fromLocalInput(until), reason)}>
+      <label>
+        Personal deadline (Europe/Ljubljana)
+        <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} aria-describedby="ext-hint" />
+      </label>
+      <p id="ext-hint" className="hint">Moves this student&apos;s deadline (and closing date, if later) to this time; results are re-scored immediately. Leave empty to remove the extension.</p>
     </ReasonAction>
   );
 }

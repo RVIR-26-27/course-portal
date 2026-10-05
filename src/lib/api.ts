@@ -45,7 +45,7 @@ export const api = {
 /** Direct reads — RLS limits them to the caller's own rows. */
 export const reads = {
   labs: async (): Promise<Lab[]> => {
-    const { data, error } = await supabase.from('labs').select('id, slug, title, sort_order, enabled, quiz_pass_percent, quiz_time_limit_seconds, quiz_question_count, daily_submission_limit').order('sort_order');
+    const { data, error } = await supabase.from('labs').select('id, slug, title, sort_order, enabled, quiz_pass_percent, quiz_time_limit_seconds, quiz_question_count, daily_submission_limit, max_units, opens_at, deadline_at, closes_at, late_cap_percent').order('sort_order');
     if (error) throw error;
     return data as Lab[];
   },
@@ -60,7 +60,7 @@ export const reads = {
     return data as LabState[];
   },
   mySubmissions: async (labId: string): Promise<Submission[]> => {
-    const { data, error } = await supabase.from('submission_requests').select('id, seq, lab_id, commit_sha, status, status_detail, requested_at, completed_at, grade_units, details').eq('lab_id', labId).order('seq', { ascending: false }).limit(20);
+    const { data, error } = await supabase.from('submission_requests').select('id, seq, lab_id, commit_sha, status, status_detail, requested_at, completed_at, grade_units, effective_units, late, details').eq('lab_id', labId).order('seq', { ascending: false }).limit(20);
     if (error) throw error;
     return data as Submission[];
   },

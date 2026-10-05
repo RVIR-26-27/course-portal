@@ -1,7 +1,7 @@
-import { lazy, Suspense, type ReactElement } from 'react';
-import { createHashRouter, Link, Outlet, RouterProvider } from 'react-router';
+import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
+import { createHashRouter, Link, NavLink, Outlet, RouterProvider, useLocation } from 'react-router';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
-import { Alert, Spinner } from './components/ui';
+import { Alert, Icon, Spinner } from './components/ui';
 import { Claim } from './pages/Claim';
 import { Dashboard } from './pages/Dashboard';
 import { LabPage } from './pages/LabPage';
@@ -19,18 +19,35 @@ const Settings = lazyNamed(() => import('./pages/admin/Settings'), 'Settings');
 const StudentDetail = lazyNamed(() => import('./pages/admin/StudentDetail'), 'StudentDetail');
 const Students = lazyNamed(() => import('./pages/admin/Students'), 'Students');
 const Submissions = lazyNamed(() => import('./pages/admin/Submissions'), 'Submissions');
+const StudentView = lazyNamed(() => import('./pages/admin/StudentView'), 'StudentView');
 
 function Shell() {
   const { session, context, signOut } = useAuth();
+  const [menu, setMenu] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    setMenu(false);
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
   return (
     <>
       <a className="skip" href="#main">Skip to content</a>
       <header className="topbar">
-        <Link to="/" className="brand">Flutter Intro Labs</Link>
-        <nav aria-label="Main">
-          {context?.admin_role && <Link to="/admin">Admin</Link>}
+        <Link to="/" className="brand">
+          <span className="brand-mark" aria-hidden><Icon name="layers" size={17} /></span>
+          <span>Flutter Intro Labs <span className="brand-sub">· RVIR</span></span>
+        </Link>
+        {session && (
+          <button type="button" className="btn btn-ghost btn-small menu-toggle" aria-expanded={menu} aria-controls="topnav" onClick={() => setMenu((m) => !m)}>
+            <Icon name="menu" /> <span className="sr-only">Menu</span>
+          </button>
+        )}
+        <nav id="topnav" aria-label="Main" className={`topnav${menu ? ' open' : ''}`}>
+          {session && <NavLink to="/" end>My labs</NavLink>}
+          {context?.admin_role && <NavLink to="/admin">Admin</NavLink>}
           {session && (
-            <button type="button" className="link" onClick={() => void signOut()}>
+            <button type="button" className="navbtn" onClick={() => void signOut()}>
+              {context?.github_id && <img className="avatar" src={`https://avatars.githubusercontent.com/u/${context.github_id}?s=52`} alt="" />}
               Sign out{context?.github_login ? ` (@${context.github_login})` : ''}
             </button>
           )}
@@ -41,6 +58,7 @@ function Shell() {
           <Outlet />
         </Suspense>
       </main>
+      <footer className="footer">University of Maribor · FERI · optional Flutter introductory labs</footer>
     </>
   );
 }
@@ -70,7 +88,7 @@ function Home() {
   const { context } = useAuth();
   return (
     <RequireStudent allowAdmin>
-      {context?.student ? <Dashboard /> : <Alert kind="info">You are signed in as staff. Open the <Link to="/admin">admin area</Link>.</Alert>}
+      {context?.student ? <Dashboard /> : <Alert kind="info">You are signed in as staff. Open the <Link to="/admin">admin area</Link>, or see the portal as a student in the <Link to="/admin/student-view">student view</Link>.</Alert>}
     </RequireStudent>
   );
 }
@@ -95,6 +113,7 @@ export const routes = [
           { path: 'submissions', element: <Submissions /> },
           { path: 'audit', element: <Audit /> },
           { path: 'settings', element: <Settings /> },
+          { path: 'student-view', element: <StudentView /> },
         ],
       },
       { path: '*', element: <Alert kind="warning">Page not found. <Link to="/">Back to the labs</Link></Alert> },

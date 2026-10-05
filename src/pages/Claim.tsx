@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { api, ApiError } from '../lib/api';
-import { Alert } from '../components/ui';
+import { Alert, Icon } from '../components/ui';
 
 export function Claim() {
   const { context, refresh } = useAuth();
@@ -11,7 +11,8 @@ export function Claim() {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <section className="card narrow">
+    <section className="card narrow page">
+      <div className="eyebrow">One-time setup</div>
       <h1>Link your student record</h1>
       <p>
         You are signed in as GitHub <strong>@{context?.github_login ?? '…'}</strong>. Enter your student number and the one-time activation
@@ -49,10 +50,13 @@ export function Claim() {
             maxLength={40}
             placeholder="XXXX-XXXX-XXXX-XXXX"
             spellCheck={false}
+            aria-describedby="code-hint"
           />
         </label>
+        <p id="code-hint" className="hint">From the course staff. Letters are not case-sensitive; dashes and spaces are optional.</p>
         {error && <Alert kind="error">{error}</Alert>}
-        <button type="submit" className="btn btn-primary" disabled={busy || !number || !code}>
+        <button type="submit" className="btn btn-primary btn-block btn-large" disabled={busy || !number || !code}>
+          <Icon name="shield" size={18} />
           {busy ? 'Linking…' : 'Link my record'}
         </button>
       </form>

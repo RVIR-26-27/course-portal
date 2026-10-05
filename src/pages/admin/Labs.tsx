@@ -1,48 +1,137 @@
-import { useEffect, useState } from 'react';
-import { api, points } from '../../lib/api';
-import { Alert, ReasonAction, Spinner } from '../../components/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router';
+import { useAuth } from '../../auth/AuthProvider';
+import { api, points, reads } from '../../lib/api';
+import type { Lab } from '../../lib/types';
+import { fmtDateTime, fromLocalInput, scheduleOf, toLocalInput, type Phase } from '../../lib/schedule';
+import { Alert, Badge, Icon, ReasonAction, Spinner, type Tone } from '../../components/ui';
 import type { OverviewRow } from './Students';
-import { LAB_SLUGS } from './AdminLayout';
+
+const PHASE: Record<Phase, [string, Tone]> = {
+  unscheduled: ['No dates set', 'neutral'],
+  upcoming: ['Opens later', 'info'],
+  open: ['Open', 'good'],
+  late: ['Past deadline (late)', 'warn'],
+  closed: ['Closed', 'bad'],
+};
 
 export function Labs() {
-  const [rows, setRows] = useState<OverviewRow[] | null>(null);
+  const [labs, setLabs] = useState<Lab[] | null>(null);
+  const [rows, setRows] = useState<OverviewRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => {
-    api.admin<OverviewRow[]>('overview').then(setRows, (e) => setMsg(e.message));
+  const load = useCallback(async () => {
+    try {
+      const [l, r] = await Promise.all([reads.labs(), api.admin<OverviewRow[]>('overview')]);
+      setLabs(l);
+      setRows(r);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Failed');
+    }
   }, []);
-  if (!rows) return msg ? <Alert kind="error">{msg}</Alert> : <Spinner />;
+  useEffect(() => { void load(); }, [load]);
+  if (!labs) return msg ? <Alert kind="error">{msg}</Alert> : <Spinner />;
   const active = rows.filter((r) => r.status === 'active');
   return (
     <div>
-      <h2>Labs</h2>
-      <table className="table">
-        <thead><tr><th>Lab</th><th>Learning done</th><th>Quiz passed</th><th>Repository ready</th><th>Graded</th><th>Average</th><th /></tr></thead>
-        <tbody>
-          {LAB_SLUGS.map((l) => {
-            const s = active.map((r) => r.labs[l]).filter(Boolean);
-            const graded = s.filter((x) => x!.grade_units !== null);
-            const avg = graded.length ? Math.round(graded.reduce((a, x) => a + (x!.grade_units ?? 0), 0) / graded.length) : null;
-            return (
-              <tr key={l}>
-                <td>{l}</td>
-                <td>{s.filter((x) => x!.learning).length}</td>
-                <td>{s.filter((x) => x!.quiz_passed).length}</td>
-                <td>{s.filter((x) => x!.access === 'ready').length}</td>
-                <td>{graded.length}</td>
-                <td>{points(avg)}</td>
-                <td>
-                  <ReasonAction label="Regrade all latest submissions" onConfirm={async (reason) => {
-                    const r = await api.admin<{ queued: number }>('regrade-lab', { lab: l, reason });
-                    setMsg(`${l}: ${r.queued} regrade(s) queued with the current grader version.`);
-                  }} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <h2>Labs &amp; deadlines</h2>
+      <p className="small muted">All times are Europe/Ljubljana. After the deadline a submission counts at most the late cap; the best result counts, so a late attempt never lowers a grade. After the closing date no new submissions are accepted. Changing a deadline or the cap re-scores existing results immediately (audited).</p>
       {msg && <Alert kind="info">{msg}</Alert>}
-      <p className="small muted">Labs are enabled/disabled and configured in the database (docs/ADMIN_GUIDE.md) so that changes are versioned and reviewed.</p>
+      <div className="lab-admin">
+        {labs.map((lab) => {
+          const s = active.map((r) => r.labs[lab.slug]).filter(Boolean);
+          const graded = s.filter((x) => x!.grade_units !== null);
+          const avg = graded.length ? Math.round(graded.reduce((a, x) => a + (x!.grade_units ?? 0), 0) / graded.length) : null;
+          return (
+            <LabScheduleCard key={lab.id} lab={lab} onSaved={async (m) => { setMsg(m); await load(); }}
+              stats={{ learning: s.filter((x) => x!.learning).length, quiz: s.filter((x) => x!.quiz_passed).length, ready: s.filter((x) => x!.access === 'ready').length, graded: graded.length, avg }} />
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function LabScheduleCard({ lab, stats, onSaved }: { lab: Lab; stats: { learning: number; quiz: number; ready: number; graded: number; avg: number | null }; onSaved: (msg: string) => Promise<void> }) {
+  const { context } = useAuth();
+  const owner = context?.admin_role === 'owner';
+  const [f, setF] = useState({ opens: toLocalInput(lab.opens_at), deadline: toLocalInput(lab.deadline_at), closes: toLocalInput(lab.closes_at), cap: String(Number(lab.late_cap_percent)), enabled: lab.enabled });
+  const sched = scheduleOf(lab);
+  const [label, tone] = PHASE[sched.phase];
+  const dirty = f.opens !== toLocalInput(lab.opens_at) || f.deadline !== toLocalInput(lab.deadline_at) || f.closes !== toLocalInput(lab.closes_at) || Number(f.cap) !== Number(lab.late_cap_percent) || f.enabled !== lab.enabled;
+  const order = (() => {
+    const o = fromLocalInput(f.opens), d = fromLocalInput(f.deadline), c = fromLocalInput(f.closes);
+    if (o && d && o >= d) return 'The opening date must be before the deadline.';
+    if (d && c && d > c) return 'The closing date must not be before the deadline.';
+    if (o && c && o >= c) return 'The opening date must be before the closing date.';
+    const cap = Number(f.cap);
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100) return 'The late cap must be between 0 and 100 %.';
+    return null;
+  })();
+  return (
+    <section className="card" aria-labelledby={`sched-${lab.slug}`}>
+      <div className="card-head">
+        <div>
+          <div className="lab-num">{lab.slug.replace('lab0', 'Lab ')}</div>
+          <h3 id={`sched-${lab.slug}`}>{lab.title}</h3>
+        </div>
+        <div className="row">
+          <Badge tone={lab.enabled ? 'good' : 'neutral'} icon={lab.enabled ? 'check' : 'lock'}>{lab.enabled ? 'Enabled' : 'Disabled'}</Badge>
+          <Badge tone={tone} icon="calendar">{label}</Badge>
+          <Link className="btn btn-small" to="/admin/student-view"><Icon name="eye" size={14} />Student view</Link>
+        </div>
+      </div>
+      <div className="stats">
+        <div className="stat"><div className="stat-label">Learning done</div><div className="stat-value">{stats.learning}</div></div>
+        <div className="stat"><div className="stat-label">Quiz passed</div><div className="stat-value">{stats.quiz}</div></div>
+        <div className="stat"><div className="stat-label">Repo ready</div><div className="stat-value">{stats.ready}</div></div>
+        <div className="stat"><div className="stat-label">Graded</div><div className="stat-value">{stats.graded}</div></div>
+        <div className="stat"><div className="stat-label">Average</div><div className="stat-value">{points(stats.avg)}</div></div>
+      </div>
+      <div className="schedule-grid">
+        <div>
+          <label>Opens
+            <input type="datetime-local" value={f.opens} onChange={(e) => setF({ ...f, opens: e.target.value })} aria-describedby={`${lab.slug}-opens-hint`} />
+          </label>
+          <p id={`${lab.slug}-opens-hint`} className="hint">{lab.opens_at ? `Now: ${fmtDateTime(lab.opens_at)}` : 'Empty: open as soon as enabled'}</p>
+        </div>
+        <div>
+          <label>Deadline
+            <input type="datetime-local" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} aria-describedby={`${lab.slug}-deadline-hint`} />
+          </label>
+          <p id={`${lab.slug}-deadline-hint`} className="hint">{lab.deadline_at ? `Now: ${fmtDateTime(lab.deadline_at)}` : 'Empty: no deadline'}</p>
+        </div>
+        <div>
+          <label>Closes (optional)
+            <input type="datetime-local" value={f.closes} onChange={(e) => setF({ ...f, closes: e.target.value })} aria-describedby={`${lab.slug}-closes-hint`} />
+          </label>
+          <p id={`${lab.slug}-closes-hint`} className="hint">{lab.closes_at ? `Now: ${fmtDateTime(lab.closes_at)}` : 'Empty: late submissions accepted until the end'}</p>
+        </div>
+        <div>
+          <label>Late cap (% of 3.00)
+            <input type="number" min={0} max={100} step={5} value={f.cap} onChange={(e) => setF({ ...f, cap: e.target.value })} aria-describedby={`${lab.slug}-cap-hint`} />
+          </label>
+          <p id={`${lab.slug}-cap-hint`} className="hint">{Number(f.cap) >= 0 ? `Late work earns at most ${points(Math.floor((lab.max_units * Number(f.cap)) / 100))}` : ''}</p>
+        </div>
+      </div>
+      <label className="toggle">
+        <input type="checkbox" checked={f.enabled} disabled={!owner} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />
+        Lab enabled{!owner && ' (owner only)'}
+      </label>
+      {order && <Alert kind="warning">{order}</Alert>}
+      <div className="actions">
+        <ReasonAction label="Save schedule" disabled={!dirty || !!order} onConfirm={async (reason) => {
+          const r = await api.admin<{ rescored_students: number }>('set-lab-schedule', {
+            lab: lab.slug, opens_at: fromLocalInput(f.opens), deadline_at: fromLocalInput(f.deadline), closes_at: fromLocalInput(f.closes),
+            late_cap_percent: Number(f.cap), enabled: owner ? f.enabled : undefined, reason,
+          });
+          await onSaved(`${lab.title}: schedule saved${r.rescored_students ? `; ${r.rescored_students} student(s) re-scored` : ''}.`);
+        }} />
+        {dirty && <button type="button" className="btn btn-ghost" onClick={() => setF({ opens: toLocalInput(lab.opens_at), deadline: toLocalInput(lab.deadline_at), closes: toLocalInput(lab.closes_at), cap: String(Number(lab.late_cap_percent)), enabled: lab.enabled })}>Discard changes</button>}
+        <ReasonAction label="Regrade all latest submissions" onConfirm={async (reason) => {
+          const r = await api.admin<{ queued: number }>('regrade-lab', { lab: lab.slug, reason });
+          await onSaved(`${lab.title}: ${r.queued} regrade(s) queued with the current grader version.`);
+        }} />
+      </div>
+    </section>
   );
 }

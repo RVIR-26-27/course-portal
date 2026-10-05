@@ -13,6 +13,11 @@ export interface Lab {
   quiz_time_limit_seconds: number;
   quiz_question_count: number;
   daily_submission_limit: number;
+  max_units: number;
+  opens_at: string | null;
+  deadline_at: string | null;
+  closes_at: string | null;
+  late_cap_percent: number;
 }
 
 export interface CategoryResult {
@@ -37,7 +42,8 @@ export interface LabState {
   latest_submitted_sha: string | null;
   official_sha: string | null;
   latest_grade_units: number | null;
-  latest_grade_details: { categories: CategoryResult[] | null; staff_review: boolean } | null;
+  latest_grade_details: { categories: CategoryResult[] | null; staff_review: boolean; raw_units?: number; late?: boolean | null; late_cap_units?: number | null } | null;
+  deadline_extension_at: string | null;
   graded_at: string | null;
   manual_override: Record<string, { label: string; at: string }> | null;
 }
@@ -61,6 +67,8 @@ export interface Submission {
   requested_at: string;
   completed_at: string | null;
   grade_units: number | null;
+  effective_units: number | null;
+  late: boolean | null;
   details: CategoryResult[] | null;
 }
 
