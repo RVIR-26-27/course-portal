@@ -1,6 +1,8 @@
 # PUBLIC course-portal: Supabase Free projects pause after 1 week without
-# activity. A daily read of the public `labs` table (anon key, RLS) keeps the
-# project active. Runs on free public-repository minutes.
+# user database activity. A daily call of the public.keepalive() RPC (anon key;
+# it reads no data) keeps the project active. Runs on free public-repository
+# minutes. GitHub disables scheduled workflows after 60 days without commits in
+# the repository; re-enable under Actions → keepalive if that happens.
 name: keepalive
 on:
   schedule:
@@ -14,10 +16,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Read public lab metadata
+      - name: Database keep-alive query
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: |
           test -n "$SUPABASE_URL" || { echo "SUPABASE_URL not configured"; exit 0; }
-          curl -fsS -o /dev/null -w "%{http_code}\n" "$SUPABASE_URL/rest/v1/labs?select=slug" -H "apikey: $SUPABASE_ANON_KEY"
+          curl -fsS --retry 3 --retry-delay 20 -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive" \
+            -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{}'
