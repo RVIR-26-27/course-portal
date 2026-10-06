@@ -5,7 +5,7 @@ import type { Lab, LabSlug, LabState, QuizItem, QuizResult, QuizStatus, Submissi
 import { liveActions, type LabActions, type PreviewAnswer, type Resolved } from '../lib/labActions';
 import { fmtDate, fmtDateTime, fmtLeft, scheduleOf, type Schedule } from '../lib/schedule';
 import { describeVariant } from '../lib/variantText';
-import { RUBRICS, TOPIC_LABELS } from '../lib/rubric';
+import { RUBRICS, TOPIC_LABELS, nativePoints, scalePoints } from '../lib/rubric';
 import { Alert, Badge, Banner, Bar, CopyButton, EmptyState, Icon, InlineMd, ScoreRing, Skeleton, Spinner, shortSha, useNow, type IconName } from '../components/ui';
 import { learningContent } from '../content';
 import { resources } from '../content/resources';
@@ -568,6 +568,7 @@ function WorkshopTab({ lab, labInfo, state, actions, reload, goSubmit }: { lab: 
   }, [status, actions, reload]);
 
   const rubric = RUBRICS[lab]!;
+  const k = Number(labInfo.max_points ?? nativePoints(lab)) / nativePoints(lab);
   const clone = `git clone https://github.com/${state.github_repo_full_name}.git`;
   return (
     <div>
@@ -638,7 +639,7 @@ function WorkshopTab({ lab, labInfo, state, actions, reload, goSubmit }: { lab: 
           </thead>
           <tbody>
             {rubric.rows.map((r) => (
-              <tr key={r.category}><td><strong>{r.category}</strong></td><td>{((Number(r.points) * Number(labInfo.max_points ?? 3)) / 3).toFixed(2)}</td><td className="small">{r.checks}</td></tr>
+              <tr key={r.category}><td><strong>{r.category}</strong></td><td>{(Number(r.points) * k).toFixed(2)}</td><td className="small">{scalePoints(r.checks, k)}</td></tr>
             ))}
           </tbody>
         </table>

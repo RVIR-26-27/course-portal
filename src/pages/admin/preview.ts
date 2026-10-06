@@ -5,6 +5,7 @@
 // engine, same bank) and returns the answer key for staff review.
 import { api } from '../../lib/api';
 import type { LabActions, PreviewAnswer, Resolved } from '../../lib/labActions';
+import { rubricUnits } from '../../lib/rubric';
 import type { Lab, LabSlug, LabState, QuizItem, QuizResult, QuizStatus, Submission } from '../../lib/types';
 
 export const SCENARIOS = [
@@ -37,13 +38,18 @@ export function randomVariant(lab: LabSlug): { params: Record<string, string | n
   return { params, publicId };
 }
 
-const SAMPLE_CATEGORIES = [
-  { key: 'functional', earned: 140, max: 160, summary: '7/8 functional checks passed' },
-  { key: 'robustness', earned: 40, max: 50, summary: '4/5 edge cases handled' },
-  { key: 'architecture', earned: 35, max: 40, summary: 'controller and repository wired correctly' },
-  { key: 'student_test', earned: 10, max: 30, summary: '1/3 regressions detected' },
-  { key: 'hygiene', earned: 20, max: 20, summary: 'analyzer clean' },
+// A plausible partial result, built from the lab's own published rubric.
+const SAMPLE_PASSED = [
+  ['functional', 7, 8, '7/8 functional checks passed'],
+  ['robustness', 4, 5, '4/5 edge cases handled'],
+  ['architecture', 3, 4, '3/4 architecture checks passed'],
+  ['student_test', 1, 3, '1/3 regressions detected'],
+  ['hygiene', 2, 2, 'analyzer clean'],
 ] as const;
+const sampleCategories = (lab: LabSlug) => {
+  const units = rubricUnits(lab);
+  return SAMPLE_PASSED.map(([key, n, of, summary]) => ({ key, earned: (units[key] * n) / of, max: units[key], summary }));
+};
 
 const hours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
 const sha = (c: string) => c.repeat(40).slice(0, 40);
@@ -82,13 +88,15 @@ export class PreviewEngine {
     this.state.github_invitation_url = `https://github.com/${name}/invitations`;
   }
 
-  private graded(units: number, late: boolean) {
+  private graded(late: boolean) {
+    const categories = sampleCategories(this.lab.slug);
+    const units = categories.reduce((n, c) => n + c.earned, 0);
     const cap = Math.floor((this.lab.max_units * Number(this.lab.late_cap_percent)) / 100);
     const eff = late ? Math.min(units, cap) : units;
     this.state.latest_grade_units = eff;
     this.state.official_sha = sha('a');
     this.state.latest_submitted_sha = sha('a');
-    this.state.latest_grade_details = { categories: SAMPLE_CATEGORIES.map((c) => ({ ...c })), staff_review: false, raw_units: units, late, late_cap_units: late ? cap : null };
+    this.state.latest_grade_details = { categories, staff_review: false, raw_units: units, late, late_cap_units: late ? cap : null };
     this.subs = [{ id: 's1', seq: 1, lab_id: this.lab.id, commit_sha: sha('a'), status: 'graded', status_detail: null, requested_at: hours(late ? -2 : -30), completed_at: hours(late ? -1.9 : -29.9), grade_units: units, effective_units: eff, late, details: null }];
   }
 
@@ -105,8 +113,8 @@ export class PreviewEngine {
     if (s === 'preparing') st.github_access_status = 'provisioning';
     if (s === 'invitation') { this.repo(); st.github_access_status = 'invitation_pending'; }
     if (['ready', 'graded', 'graded_late', 'deadline_soon', 'closed'].includes(s)) { this.repo(); st.github_access_status = 'ready'; }
-    if (s === 'graded' || s === 'closed') this.graded(245, false);
-    if (s === 'graded_late') { this.lab.opens_at = hours(-24 * 14); this.lab.deadline_at = hours(-24); this.lab.closes_at = hours(24 * 6); this.graded(280, true); }
+    if (s === 'graded' || s === 'closed') this.graded(false);
+    if (s === 'graded_late') { this.lab.opens_at = hours(-24 * 14); this.lab.deadline_at = hours(-24); this.lab.closes_at = hours(24 * 6); this.graded(true); }
     if (s === 'upcoming') { this.lab.opens_at = hours(24 * 3); this.lab.deadline_at = hours(24 * 17); this.lab.closes_at = null; }
     if (s === 'deadline_soon') { this.lab.opens_at = hours(-24 * 13); this.lab.deadline_at = hours(20); this.lab.closes_at = hours(24 * 7); }
     if (s === 'closed') { this.lab.opens_at = hours(-24 * 30); this.lab.deadline_at = hours(-24 * 9); this.lab.closes_at = hours(-24 * 2); }
@@ -182,14 +190,14 @@ export class PreviewEngine {
         this.state.latest_submitted_sha = commit;
         this.later(1500, () => { this.subs = this.subs.map((s) => (s.id === sub.id ? { ...s, status: 'running' } : s)); });
         this.later(4500, () => {
-          const raw = 300;
+          const raw = this.lab.max_units;
           const cap = Math.floor((this.lab.max_units * Number(this.lab.late_cap_percent)) / 100);
           const eff = late ? Math.min(raw, cap) : raw;
           this.subs = this.subs.map((s) => (s.id === sub.id ? { ...s, status: 'graded', grade_units: raw, effective_units: eff, completed_at: new Date().toISOString() } : s));
           if ((this.state.latest_grade_units ?? -1) < eff) {
             this.state.latest_grade_units = eff;
             this.state.official_sha = commit;
-            this.state.latest_grade_details = { categories: SAMPLE_CATEGORIES.map((c) => ({ ...c, earned: c.max })), staff_review: false, raw_units: raw, late, late_cap_units: late ? cap : null };
+            this.state.latest_grade_details = { categories: sampleCategories(this.lab.slug).map((c) => ({ ...c, earned: c.max })), staff_review: false, raw_units: raw, late, late_cap_units: late ? cap : null };
           }
         });
         this.changed();

@@ -200,7 +200,17 @@ describe('admin student view (simulation)', () => {
   it('caps a simulated late submission like the server', async () => {
     const engine = new PreviewEngine({ ...LAB }, 'graded_late', { params: {}, publicId: 'V1-ABCDEF' }, () => undefined);
     expect(engine.state.latest_grade_units).toBe(150);
-    expect(engine.state.latest_grade_details).toMatchObject({ late: true, raw_units: 280, late_cap_units: 150 });
+    expect(engine.state.latest_grade_details).toMatchObject({ late: true, raw_units: 240, late_cap_units: 150 });
+    engine.dispose();
+  });
+
+  it('builds the simulated result from the lab\'s own rubric (Lab 3: 400 units)', async () => {
+    const lab3 = { ...LAB, id: 'lab-3', slug: 'lab03' as const, max_units: 400, max_points: 4 };
+    const engine = new PreviewEngine(lab3, 'graded_late', { params: {}, publicId: 'V1-ABCDEF' }, () => undefined);
+    const cats = engine.state.latest_grade_details!.categories!;
+    expect(cats.map((c) => c.max)).toEqual([200, 75, 60, 45, 20]);
+    expect(engine.state.latest_grade_details).toMatchObject({ late: true, raw_units: 315, late_cap_units: 200 });
+    expect(engine.state.latest_grade_units).toBe(200);
     engine.dispose();
   });
 });
